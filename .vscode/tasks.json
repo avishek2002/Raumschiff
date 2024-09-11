@@ -18,11 +18,13 @@
                 "-lglfw3",
                 "-lgdi32",
                 "-luser32",
+                "-lassimp",
+                "-lassimp-vc143-mt",
                 "-o",
                 "${workspaceFolder}/Raumschiff.exe"
             ],
             "options": {
-                "cwd": "${workspaceFolder}"
+                "cwd": "${workspaceFolder}" 
             },
             "problemMatcher": [
                 "$gcc"
