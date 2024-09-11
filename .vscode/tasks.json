@@ -16,6 +16,8 @@
                 "${workspaceFolder}/src/main.cpp",
                 "${workspaceFolder}/src/glad.c",
                 "-lglfw3",
+                "-lgdi32",
+                "-luser32",
                 "-o",
                 "${workspaceFolder}/Raumschiff.exe"
             ],
