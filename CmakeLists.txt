@@ -1,0 +1,26 @@
+cmake_minimum_required(VERSION 3.10)
+project(Raumschiff)
+
+set(CMAKE_CXX_STANDARD 17)
+
+# Set compilers
+set(CMAKE_C_COMPILER "C:/msys64/ucrt64/bin/gcc.exe")
+set(CMAKE_CXX_COMPILER "C:/msys64/ucrt64/bin/g++.exe")
+
+# Include directories
+include_directories(${CMAKE_SOURCE_DIR}/Dependencies/Include)
+
+# Link directories
+link_directories(${CMAKE_SOURCE_DIR}/Dependencies/Library)
+
+# Add source files
+set(SOURCES
+    src/main.cpp
+    src/glad.c
+)
+
+# Add executable
+add_executable(Raumschiff ${SOURCES})
+
+# Link libraries
+target_link_libraries(Raumschiff glfw3 gdi32 user32 assimp-vc143-mt)
