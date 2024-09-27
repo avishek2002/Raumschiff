@@ -15,10 +15,10 @@
                 "-L${workspaceFolder}/Dependencies/Library",
                 "${workspaceFolder}/src/main.cpp",
                 "${workspaceFolder}/src/glad.c",
+                "${workspaceFolder}/Dependencies/tinyobjloader/tiny_obj_loader.cc",
                 "-lglfw3",
                 "-lgdi32",
                 "-luser32",
-                "-lassimp-vc143-mt",
                 "-o",
                 "${workspaceFolder}/Raumschiff.exe"
             ],

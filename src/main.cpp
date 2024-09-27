@@ -1,15 +1,12 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
-
+#include <tiny_obj_loader.h>
+#include <vector>
 #include <iostream>
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
-// void loadModel(const std::string& path);
+void loadModel(const std::string& path);
 
 // settings
 const unsigned int SCR_WIDTH = 800;
@@ -131,7 +128,7 @@ int main()
 
 
     // uncomment this call to draw in wireframe polygons.
-    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
     // render loop
     // -----------
@@ -156,7 +153,6 @@ int main()
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);
         glfwPollEvents();
-        // loadModel("BlenderObjects/Spaceship2.blend");
     }
 
     // optional: de-allocate all resources once they've outlived their purpose:
@@ -188,15 +184,36 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
-// void loadModel(const std::string& path) 
-// {
-//     assimp::Importer importer;
-//     const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);
+extern "C" {
+    bool LoadOBJ(const char* inputfile, std::vector<float>& vertices) {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
 
-//     if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
-//         std::cout << "ERROR::ASSIMP::" << importer.GetErrorString() << std::endl;
-//         return;
-//     }
+        bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputfile);
 
-//     // Process the scene and load the model data
-// }
+        if (!ret) {
+            return false;
+        }
+
+        for (size_t s = 0; s < shapes.size(); s++) {
+            size_t index_offset = 0;
+            for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
+                int fv = shapes[s].mesh.num_face_vertices[f];
+                for (size_t v = 0; v < fv; v++) {
+                    tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
+                    tinyobj::real_t vx = attrib.vertices[3 * idx.vertex_index + 0];
+                    tinyobj::real_t vy = attrib.vertices[3 * idx.vertex_index + 1];
+                    tinyobj::real_t vz = attrib.vertices[3 * idx.vertex_index + 2];
+                    vertices.push_back(vx);
+                    vertices.push_back(vy);
+                    vertices.push_back(vz);
+                }
+                index_offset += fv;
+            }
+        }
+
+        return true;
+    }
+}
