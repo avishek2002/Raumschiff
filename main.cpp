@@ -5,6 +5,7 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <vector>
+#include <cmath> // For sin and cos functions
 
 // GLM for matrix operations
 #include <glm/glm.hpp>
@@ -14,7 +15,7 @@
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
-// Vertex Shader Source
+// Vertex Shader Source for the model
 const char* vertexShaderSource = R"glsl(
     #version 330 core
     layout(location = 0) in vec3 aPos;
@@ -35,7 +36,7 @@ const char* vertexShaderSource = R"glsl(
     }
 )glsl";
 
-// Fragment Shader Source
+// Fragment Shader Source for the model
 const char* fragmentShaderSource = R"glsl(
     #version 330 core
     out vec4 FragColor;
@@ -53,7 +54,7 @@ const char* fragmentShaderSource = R"glsl(
         // Ambient
         float ambientStrength = 0.1;
         vec3 ambient = ambientStrength * lightColor;
-  	
+      	
         // Diffuse 
         vec3 norm = normalize(Normal);
         vec3 lightDir = normalize(lightPos - FragPos);  
@@ -72,10 +73,39 @@ const char* fragmentShaderSource = R"glsl(
     }
 )glsl";
 
-// Global variables for rotation
-float rotationX = 0.0f;
-float rotationY = 0.0f;
+// Vertex Shader Source for the axes
+const char* axesVertexShaderSource = R"glsl(
+    #version 330 core
+    layout(location = 0) in vec3 aPos;
+    layout(location = 1) in vec3 aColor;
+
+    uniform mat4 view;
+    uniform mat4 projection;
+
+    out vec3 vertexColor;
+
+    void main() {
+        vertexColor = aColor;
+        gl_Position = projection * view * vec4(aPos, 1.0);
+    }
+)glsl";
+
+// Fragment Shader Source for the axes
+const char* axesFragmentShaderSource = R"glsl(
+    #version 330 core
+    in vec3 vertexColor;
+    out vec4 FragColor;
+
+    void main() {
+        FragColor = vec4(vertexColor, 1.0);
+    }
+)glsl";
+
+// Global variables for rotation and movement
+glm::vec3 modelPosition = glm::vec3(0.0f, 0.0f, 0.0f);
+float rotationY = 0.0f; // Yaw rotation
 const float rotationSpeed = 0.01f;
+const float movementSpeed = 0.05f;
 
 // Function prototypes
 void processInput(GLFWwindow* window);
@@ -97,7 +127,7 @@ int main() {
 #endif
 
     // Create window
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "3D Model Loader with Controls", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "3D Model Loader with Axes Visualization", NULL, NULL);
     if (!window) {
         std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
@@ -119,7 +149,7 @@ int main() {
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
 
-    // Build and compile shaders
+    // Build and compile shaders for the model
     unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
     glCompileShader(vertexShader);
@@ -138,6 +168,26 @@ int main() {
 
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
+
+    // Build and compile shaders for the axes
+    unsigned int axesVertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(axesVertexShader, 1, &axesVertexShaderSource, NULL);
+    glCompileShader(axesVertexShader);
+    checkGLError("Axes vertex shader compilation error");
+
+    unsigned int axesFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(axesFragmentShader, 1, &axesFragmentShaderSource, NULL);
+    glCompileShader(axesFragmentShader);
+    checkGLError("Axes fragment shader compilation error");
+
+    unsigned int axesShaderProgram = glCreateProgram();
+    glAttachShader(axesShaderProgram, axesVertexShader);
+    glAttachShader(axesShaderProgram, axesFragmentShader);
+    glLinkProgram(axesShaderProgram);
+    checkGLError("Axes shader program linking error");
+
+    glDeleteShader(axesVertexShader);
+    glDeleteShader(axesFragmentShader);
 
     // Load .obj file
     tinyobj::attrib_t attrib;
@@ -161,7 +211,7 @@ int main() {
         return -1;
     }
 
-    // Prepare vertex data
+    // Prepare vertex data for the model
     std::vector<float> vertices;
     std::vector<unsigned int> indices;
     for (size_t s = 0; s < shapes.size(); s++) {
@@ -200,13 +250,13 @@ int main() {
         }
     }
 
-    // Setup buffers and arrays
+    // Setup buffers and arrays for the model
     unsigned int VBO, VAO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
 
-    // Bind buffers
+    // Bind buffers for the model
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
@@ -225,6 +275,48 @@ int main() {
 
     checkGLError("Vertex attribute setup error");
 
+    // Prepare vertex data for the axes
+    float axesVertices[] = {
+        // Positions          // Colors
+        // X-axis (Red)
+        0.0f, 0.0f, 0.0f,     1.0f, 0.0f, 0.0f, // Origin
+        10.0f, 0.0f, 0.0f,    1.0f, 0.0f, 0.0f, // Positive X direction
+
+        // Y-axis (Green)
+        0.0f, 0.0f, 0.0f,     0.0f, 1.0f, 0.0f, // Origin
+        0.0f, 10.0f, 0.0f,    0.0f, 1.0f, 0.0f, // Positive Y direction
+
+        // Z-axis (Blue)
+        0.0f, 0.0f, 0.0f,     0.0f, 0.0f, 1.0f, // Origin
+        0.0f, 0.0f, 10.0f,    0.0f, 0.0f, 1.0f  // Positive Z direction
+    };
+
+    // Generate buffers and arrays for the axes
+    unsigned int axesVAO, axesVBO;
+    glGenVertexArrays(1, &axesVAO);
+    glGenBuffers(1, &axesVBO);
+
+    // Bind and set up axes VAO and VBO
+    glBindVertexArray(axesVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(axesVertices), axesVertices, GL_STATIC_DRAW);
+
+    // Position attribute
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // Color attribute
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    checkGLError("Axes attribute setup error");
+
+    // Get uniform locations for the model shader
+    unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
+    unsigned int viewLoc  = glGetUniformLocation(shaderProgram, "view");
+    unsigned int projLoc  = glGetUniformLocation(shaderProgram, "projection");
+
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         // Input
@@ -234,45 +326,57 @@ int main() {
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Activate shader
-        glUseProgram(shaderProgram);
-
-        // Transformations
+        // Transformations for the model
         glm::mat4 model = glm::mat4(1.0f);
-        model = glm::rotate(model, rotationX, glm::vec3(1.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, rotationY, glm::vec3(0.0f, 1.0f, 0.0f));
 
-        // Define camera position along the x-axis
-        glm::vec3 cameraPos = glm::vec3(30.0f, 15.0f, 0.0f);
+        // Rotate to make Z-axis point up
+        model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Rotate around X-axis
 
-        // Define the point the camera is looking at (the origin)
-        glm::vec3 target = glm::vec3(0.0f, 0.0f, 0.0f);
+        // Apply translation based on modelPosition
+        model = glm::translate(model, modelPosition);
 
-        // Define the up direction
-        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+        // Apply rotation around new Y-axis (previously Z-axis)
+        model = glm::rotate(model, rotationY, glm::vec3(0.0f, 0.0f, 1.0f));
 
-        // Create the view matrix
+        // Camera settings
+        glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
+        glm::vec3 cameraPos = modelPosition + cameraOffset;
+        glm::vec3 target = modelPosition;
+        glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f);
         glm::mat4 view = glm::lookAt(cameraPos, target, up);
 
         // Projection
-        glm::mat4 projection = glm::perspective(glm::radians(45.0f), 
-                                                (float)SCR_WIDTH / (float)SCR_HEIGHT, 
+        glm::mat4 projection = glm::perspective(glm::radians(45.0f),
+                                                (float)SCR_WIDTH / (float)SCR_HEIGHT,
                                                 0.1f, 100.0f);
 
-        // Set uniforms
-        unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
-        unsigned int viewLoc  = glGetUniformLocation(shaderProgram, "view");
-        unsigned int projLoc  = glGetUniformLocation(shaderProgram, "projection");
+        // Render the axes
+        glUseProgram(axesShaderProgram);
+        glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+        glBindVertexArray(axesVAO);
 
+        // Optionally set line width
+        glLineWidth(2.0f);
+
+        // Draw the axes
+        glDrawArrays(GL_LINES, 0, 6);
+
+        // Render the model
+        glUseProgram(shaderProgram);
+
+        // Set uniforms for the model shader
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
         glUniformMatrix4fv(viewLoc,  1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(projLoc,  1, GL_FALSE, glm::value_ptr(projection));
 
-        // Light and material properties
-        glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 1.2f, 1.0f, 2.0f);
+        // Update viewPos uniform
         glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPos));
+
+        // Light and material properties
+        glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 50.0f, 50.0f, 50.0f);
         glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), 1.0f, 1.0f, 1.0f);
-        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 0.5f, 0.31f);
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.6f, 0.6f, 0.6f);
 
         // Render the model
         glBindVertexArray(VAO);
@@ -288,30 +392,41 @@ int main() {
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
 
+    glDeleteVertexArrays(1, &axesVAO);
+    glDeleteBuffers(1, &axesVBO);
+
     glfwTerminate();
     return 0;
 }
 
-// Process input
 void processInput(GLFWwindow* window) {
     // Close window
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // Rotation controls
+    // Calculate forward vector based on current rotation
+    glm::vec3 forward = glm::vec3(-cos(rotationY), -sin(rotationY), 0.0f);
+    glm::vec3 right = glm::vec3(-forward.y, forward.x, 0.0f); // Right vector is perpendicular to forward
+
+    // Forward/backward movement
     if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-        rotationX -= rotationSpeed;
+        modelPosition += forward * movementSpeed;
     }
     if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-        rotationX += rotationSpeed;
+        modelPosition -= forward * movementSpeed;
     }
+
+    // Left/right strafing movement
     if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-        rotationY -= rotationSpeed;
+        modelPosition -= right * movementSpeed;
     }
     if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-        rotationY += rotationSpeed;
+        modelPosition += right * movementSpeed;
     }
 }
+
+
+
 
 // Function to check for OpenGL errors
 void checkGLError(const std::string& errorMessage) {
