@@ -1,13 +1,6 @@
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
-
+#include <tiny_obj_loader.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
-
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
-
 #include <iostream>
 #include <vector>
 #include <cmath> // For sin and cos functions
@@ -274,23 +267,57 @@ int main() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // note that this is allowed, the call to glVertexAttribPointer registered VBO as the vertex attribute's bound vertex buffer object so afterwards we can safely unbind
-    glBindBuffer(GL_ARRAY_BUFFER, 0); 
+    // Vertex normals
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
-    // You can unbind the VAO afterwards so other VAO calls won't accidentally modify this VAO, but this rarely happens. Modifying other
-    // VAOs requires a call to glBindVertexArray anyways so we generally don't unbind VAOs (nor VBOs) when it's not directly necessary.
-    glBindVertexArray(0); 
+    checkGLError("Vertex attribute setup error");
 
+    // Prepare vertex data for the axes
+    float axesVertices[] = {
+        // Positions          // Colors
+        // X-axis (Red)
+        0.0f, 0.0f, 0.0f,     1.0f, 0.0f, 0.0f, // Origin
+        10.0f, 0.0f, 0.0f,    1.0f, 0.0f, 0.0f, // Positive X direction
 
-    // uncomment this call to draw in wireframe polygons.
-    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        // Y-axis (Green)
+        0.0f, 0.0f, 0.0f,     0.0f, 1.0f, 0.0f, // Origin
+        0.0f, 10.0f, 0.0f,    0.0f, 1.0f, 0.0f, // Positive Y direction
 
-    // render loop
-    // -----------
-    while (!glfwWindowShouldClose(window))
-    {
-        // input
-        // -----
+        // Z-axis (Blue)
+        0.0f, 0.0f, 0.0f,     0.0f, 0.0f, 1.0f, // Origin
+        0.0f, 0.0f, 10.0f,    0.0f, 0.0f, 1.0f  // Positive Z direction
+    };
+
+    // Generate buffers and arrays for the axes
+    unsigned int axesVAO, axesVBO;
+    glGenVertexArrays(1, &axesVAO);
+    glGenBuffers(1, &axesVBO);
+
+    // Bind and set up axes VAO and VBO
+    glBindVertexArray(axesVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(axesVertices), axesVertices, GL_STATIC_DRAW);
+
+    // Position attribute
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // Color attribute
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    checkGLError("Axes attribute setup error");
+
+    // Get uniform locations for the model shader
+    unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
+    unsigned int viewLoc  = glGetUniformLocation(shaderProgram, "view");
+    unsigned int projLoc  = glGetUniformLocation(shaderProgram, "projection");
+
+    // Main loop
+    while (!glfwWindowShouldClose(window)) {
+        // Input
         processInput(window);
 
         // Render
@@ -310,10 +337,11 @@ int main() {
         model = glm::rotate(model, rotationY, glm::vec3(0.0f, 0.0f, 1.0f));
 
         // Camera settings
-        glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
-        glm::vec3 cameraPos = modelPosition + cameraOffset;
+        //glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
+        glm::vec3 cameraOffset = glm::vec3(30.0f, 30.0f, 30.0f); // checking if the obj is moving linearly in the axes
+        glm::vec3 cameraPos = cameraOffset; // modelPosition + cameraOffset;
         glm::vec3 target = modelPosition;
-        glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f);
+        glm::vec3 up = glm::vec3(.0f, 0.0f, 1.0f);
         glm::mat4 view = glm::lookAt(cameraPos, target, up);
 
         // Projection
@@ -332,7 +360,6 @@ int main() {
 
         // Draw the axes
         glDrawArrays(GL_LINES, 0, 6);
-
         // Render the model
         glUseProgram(shaderProgram);
 
@@ -374,26 +401,39 @@ void processInput(GLFWwindow* window) {
     // Close window
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
-}
 
-// glfw: whenever the window size changed (by OS or user resize) this callback function executes
-// ---------------------------------------------------------------------------------------------
-void framebuffer_size_callback(GLFWwindow* window, int width, int height)
-{
-    // make sure the viewport matches the new window dimensions; note that width and 
-    // height will be significantly larger than specified on retina displays.
-    glViewport(0, 0, width, height);
-}
+    // Calculate forward vector based on current rotation
+    glm::vec3 forward = glm::vec3(-cos(rotationY), -sin(rotationY), 0.0f);
+    glm::vec3 right = glm::vec3(-forward.y, forward.x, 0.0f); // Right vector is perpendicular to forward
 
-void loadModel(const std::string& path) 
-{
-    Assimp::Importer importer;
-    const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);
-
-    if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
-        std::cout << "ERROR::ASSIMP::" << importer.GetErrorString() << std::endl;
-        return;
+    // Forward/backward movement - moves along the x axis
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
+        //modelPosition += forward * movementSpeed;
+         modelPosition.x -= movementSpeed;
+    }
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+        //modelPosition -= forward * movementSpeed;
+        modelPosition.x += movementSpeed;
     }
 
-    // Process the scene and load the model data
+    // Left/right strafing movement - moves along the z axis
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+        //modelPosition -= right * movementSpeed;
+        modelPosition.z += movementSpeed;
+    }
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+        //modelPosition += right * movementSpeed;
+        modelPosition.z -= movementSpeed;
+    }
+}
+
+
+
+
+// Function to check for OpenGL errors
+void checkGLError(const std::string& errorMessage) {
+    GLenum err;
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        std::cerr << errorMessage << ": OpenGL error: " << err << std::endl;
+    }
 }
