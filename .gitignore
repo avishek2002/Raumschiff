@@ -1,7 +1,17 @@
-#ignore all
+# Ignore everything
 *
 
-#except for these files
+# Explicitly allow .gitignore
 !.gitignore
+
+# Unignore the src directory
+!src/
+
+# Ignore everything in src by default
+src/*
+
+# Explicitly allow main.cpp in src
 !src/main.cpp
-!BlenderObjects/*
+
+# Allow BlenderObjects folder and its contents
+!BlenderObjects/
