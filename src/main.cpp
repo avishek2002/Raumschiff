@@ -1,6 +1,4 @@
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
-
+#include <tiny_obj_loader.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
@@ -339,10 +337,11 @@ int main() {
         model = glm::rotate(model, rotationY, glm::vec3(0.0f, 0.0f, 1.0f));
 
         // Camera settings
-        glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
-        glm::vec3 cameraPos = modelPosition + cameraOffset;
+        //glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
+        glm::vec3 cameraOffset = glm::vec3(30.0f, 30.0f, 30.0f); // checking if the obj is moving linearly in the axes
+        glm::vec3 cameraPos = cameraOffset; // modelPosition + cameraOffset;
         glm::vec3 target = modelPosition;
-        glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f);
+        glm::vec3 up = glm::vec3(.0f, 0.0f, 1.0f);
         glm::mat4 view = glm::lookAt(cameraPos, target, up);
 
         // Projection
@@ -361,7 +360,6 @@ int main() {
 
         // Draw the axes
         glDrawArrays(GL_LINES, 0, 6);
-
         // Render the model
         glUseProgram(shaderProgram);
 
@@ -408,20 +406,24 @@ void processInput(GLFWwindow* window) {
     glm::vec3 forward = glm::vec3(-cos(rotationY), -sin(rotationY), 0.0f);
     glm::vec3 right = glm::vec3(-forward.y, forward.x, 0.0f); // Right vector is perpendicular to forward
 
-    // Forward/backward movement
+    // Forward/backward movement - moves along the x axis
     if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-        modelPosition += forward * movementSpeed;
+        //modelPosition += forward * movementSpeed;
+         modelPosition.x -= movementSpeed;
     }
     if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-        modelPosition -= forward * movementSpeed;
+        //modelPosition -= forward * movementSpeed;
+        modelPosition.x += movementSpeed;
     }
 
-    // Left/right strafing movement
+    // Left/right strafing movement - moves along the z axis
     if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-        modelPosition -= right * movementSpeed;
+        //modelPosition -= right * movementSpeed;
+        modelPosition.z += movementSpeed;
     }
     if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-        modelPosition += right * movementSpeed;
+        //modelPosition += right * movementSpeed;
+        modelPosition.z -= movementSpeed;
     }
 }
 
