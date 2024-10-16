@@ -120,9 +120,6 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // Needed for macOS
-#endif
 
     // Create window
     GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "3D Model Loader with Axes Visualization", NULL, NULL);
@@ -193,7 +190,7 @@ int main() {
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
 
-    std::string inputfile = "./BlenderObjects/Spaceship2.obj"; // Replace with your .obj file path
+    std::string inputfile = "./BlenderObjects/Spaceship2.obj";
     bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputfile.c_str());
 
     if (!warn.empty()) {
@@ -346,8 +343,7 @@ int main() {
 
         // Projection
         glm::mat4 projection = glm::perspective(glm::radians(45.0f),
-                                                (float)SCR_WIDTH / (float)SCR_HEIGHT,
-                                                0.1f, 100.0f);
+                (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
 
         // Render the axes
         glUseProgram(axesShaderProgram);
