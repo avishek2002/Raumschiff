@@ -1,6 +1,7 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 #include <GL/glew.h>
+
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <vector>
@@ -10,6 +11,13 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+
+// Allows text to be printed from text file
+#include <fstream>
+#include <sstream>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <map>
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
@@ -100,6 +108,33 @@ const char* axesFragmentShaderSource = R"glsl(
     }
 )glsl";
 
+// Post-processing shader
+const char* postProcessingVertexShaderSource = R"glsl(
+    #version 330 core
+    layout(location = 0) in vec2 aPos;
+    layout(location = 1) in vec2 aTexCoords;
+
+    out vec2 TexCoords;
+
+    void main() {
+        TexCoords = aTexCoords;
+        gl_Position = vec4(aPos, 0.0, 1.0);
+    }
+)glsl";
+
+const char* postProcessingFragmentShaderSource = R"glsl(
+    #version 330 core
+    out vec4 FragColor;
+
+    in vec2 TexCoords;
+
+    uniform sampler2D screenTexture;
+
+    void main() {
+        FragColor = texture(screenTexture, TexCoords);
+    }
+)glsl";
+
 // Global variables for rotation and movement
 glm::vec3 modelPosition = glm::vec3(0.0f, 0.0f, 0.0f);
 float rotationY = 0.0f; // Yaw rotation
@@ -110,9 +145,38 @@ const float movementSpeed = 0.05f;
 void processInput(GLFWwindow* window);
 void checkGLError(const std::string& errorMessage);
 
-int main() {
+// Define the Character structure for text display
+struct Character 
+{
+    GLuint TextureID;   // ID of the glyph
+    glm::ivec2 Size;    // Size 
+    glm::ivec2 Bearing; // Offset from baseline 
+    GLuint Advance;     // Offset to advance to next char (glyph)
+};
+
+enum GameState 
+{
+    Start_Screen,
+    Lore_Screen,
+    Game_Screen,
+    End_screen
+};
+
+GameState gameState = Lore_Screen;
+
+void handleInput(GLFWwindow* window) 
+{
+    if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) 
+    {
+        gameState = Game_Screen;
+    }
+}
+
+int main() 
+{
     // Initialize GLFW
-    if (!glfwInit()) {
+    if (!glfwInit()) 
+    {
         std::cerr << "Failed to initialize GLFW" << std::endl;
         return -1;
     }
@@ -121,9 +185,6 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // Needed for macOS
-#endif
 
     // Create window
     GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "3D Model Loader with Axes Visualization", NULL, NULL);
@@ -144,7 +205,8 @@ int main() {
     }
 
     checkGLError("GLEW initialization error");
-
+    // Set up rendering
+    //---------------------------------------------------------------------------------------------------------------------------------------------------------------
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
 
@@ -194,7 +256,7 @@ int main() {
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
 
-    std::string inputfile = "./BlenderObjects/Spaceship2.obj"; // Replace with your .obj file path
+    std::string inputfile = "./BlenderObjects/Spaceship2.obj";
     bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputfile.c_str());
 
     if (!warn.empty()) {
@@ -315,72 +377,311 @@ int main() {
     unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
     unsigned int viewLoc  = glGetUniformLocation(shaderProgram, "view");
     unsigned int projLoc  = glGetUniformLocation(shaderProgram, "projection");
+    //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+    //---------------------------------------------------- Post-processing setup ------------------------------------------------------------------------------------
+    
+    // Framebuffer configuration
+    unsigned int framebuffer;
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+
+    // Create a color attachment texture
+    unsigned int textureColorbuffer;
+    glGenTextures(1, &textureColorbuffer);
+    glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureColorbuffer, 0);
+
+    // Create a renderbuffer object for depth and stencil attachment (we won't be sampling these)
+    unsigned int rbo;
+    glGenRenderbuffers(1, &rbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCR_WIDTH, SCR_HEIGHT);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
+
+    // Check if framebuffer is complete
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Screen quad VAO
+    float quadVertices[] = {
+        // positions   // texCoords
+        -1.0f,  1.0f,  0.0f, 1.0f,
+        -1.0f, -1.0f,  0.0f, 0.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+
+        -1.0f,  1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 1.0f
+    };
+
+    unsigned int quadVAO, quadVBO;
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+
+    unsigned int postProcessingVertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(postProcessingVertexShader, 1, &postProcessingVertexShaderSource, NULL);
+    glCompileShader(postProcessingVertexShader);
+    checkGLError("Post-processing vertex shader compilation error");
+
+    unsigned int postProcessingFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(postProcessingFragmentShader, 1, &postProcessingFragmentShaderSource, NULL);
+    glCompileShader(postProcessingFragmentShader);
+    checkGLError("Post-processing fragment shader compilation error");
+
+    unsigned int postProcessingShaderProgram = glCreateProgram();
+    glAttachShader(postProcessingShaderProgram, postProcessingVertexShader);
+    glAttachShader(postProcessingShaderProgram, postProcessingFragmentShader);
+    glLinkProgram(postProcessingShaderProgram);
+    checkGLError("Post-processing shader program linking error");
+
+    glDeleteShader(postProcessingVertexShader);
+    glDeleteShader(postProcessingFragmentShader);
+
+    //---------------------------------------------------- Freetype setup ------------------------------------------------------------------------------------
+    // Initialize FreeType
+            FT_Library ft;
+            if (FT_Init_FreeType(&ft)) {
+                std::cerr << "ERROR::FREETYPE: Could not init FreeType Library" << std::endl;
+            }
+
+            // Load font as face
+            FT_Face face;
+            if (FT_New_Face(ft, "c:/WINDOWS/Fonts/VGAFIX.FON", 0, &face)) {
+                std::cerr << "ERROR::FREETYPE: Failed to load font" << std::endl;
+            }
+
+            // Set size to load glyphs as
+            FT_Set_Pixel_Sizes(face, 0, 48);
+
+            // Disable byte-alignment restriction
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+            // Load first 128 characters of ASCII set
+            std::map<GLchar, Character> Characters;
+            for (GLubyte c = 0; c < 128; c++) {
+                // Load character glyph 
+                if (FT_Load_Char(face, c, FT_LOAD_RENDER)) {
+                    std::cerr << "ERROR::FREETYPE: Failed to load Glyph" << std::endl;
+                    continue;
+                }
+                // Generate texture
+                GLuint texture;
+                glGenTextures(1, &texture);
+                glBindTexture(GL_TEXTURE_2D, texture);
+                glTexImage2D(
+                    GL_TEXTURE_2D,
+                    0,
+                    GL_RED,
+                    face->glyph->bitmap.width,
+                    face->glyph->bitmap.rows,
+                    0,
+                    GL_RED,
+                    GL_UNSIGNED_BYTE,
+                    face->glyph->bitmap.buffer
+                );
+                // Set texture options
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                // Now store character for later use
+                Character character = {
+                    texture,
+                    glm::ivec2(face->glyph->bitmap.width, face->glyph->bitmap.rows),
+                    glm::ivec2(face->glyph->bitmap_left, face->glyph->bitmap_top),
+                    face->glyph->advance.x
+                };
+                Characters.insert(std::pair<GLchar, Character>(c, character));
+            }
+            glBindTexture(GL_TEXTURE_2D, 0);
+
+            // Destroy FreeType once we're finished
+            FT_Done_Face(face);
+            FT_Done_FreeType(ft);
+    //---------------------------------------------------------------------------------------------------------------------------------------------------------------
     // Main loop
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window)) 
+    {
         // Input
         processInput(window);
+        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
+        // If statements dictate the current state of the game
+        if(gameState == Start_Screen)
+        {
+            //TODO: Add code to render the start screen
+            glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            //TODO: Add code to render "Start Game" text or button
+        }
+        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
+        else if (gameState == Lore_Screen) 
+        {
+            // Clear the screen with black color
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
 
-        // Render
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            // Load the lore text from file
+            static std::string loreText;
+            static bool loreLoaded = false;
+            if (!loreLoaded) 
+            {
+                std::ifstream loreFile("src/Lore_text_file.txt");
+                if (!loreFile.is_open()) 
+                {
+                    std::cerr << "Failed to open lore text file!" << std::endl;
+                    glfwSetWindowShouldClose(window, true);
+                    break;
+                }
 
-        // Transformations for the model
-        glm::mat4 model = glm::mat4(1.0f);
+                std::stringstream loreStream;
+                loreStream << loreFile.rdbuf();
+                loreText = loreStream.str();
+                loreFile.close();
+                loreLoaded = true;
+            }
 
-        // Rotate to make Z-axis point up
-        model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Rotate around X-axis
+            // Print the lore text slowly
+            static size_t charIndex = 0;
+            static float timeAccumulator = 0.0f;
+            const float charDisplayInterval = 0.05f; // Time interval between characters
 
-        // Apply translation based on modelPosition
-        model = glm::translate(model, modelPosition);
+            timeAccumulator += glfwGetTime();
+            glfwSetTime(0.0);
 
-        // Apply rotation around new Y-axis (previously Z-axis)
-        model = glm::rotate(model, rotationY, glm::vec3(0.0f, 0.0f, 1.0f));
+            if (timeAccumulator >= charDisplayInterval && charIndex < loreText.size()) 
+            {
+                charIndex++;
+                timeAccumulator = 0.0f;
+            }
 
-        // Camera settings
-        //glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
-        glm::vec3 cameraOffset = glm::vec3(30.0f, 30.0f, 30.0f); // checking if the obj is moving linearly in the axes
-        glm::vec3 cameraPos = cameraOffset; // modelPosition + cameraOffset;
-        glm::vec3 target = modelPosition;
-        glm::vec3 up = glm::vec3(.0f, 0.0f, 1.0f);
-        glm::mat4 view = glm::lookAt(cameraPos, target, up);
+            std::string displayedText = loreText.substr(0, charIndex);
 
-        // Projection
-        glm::mat4 projection = glm::perspective(glm::radians(45.0f),
-                                                (float)SCR_WIDTH / (float)SCR_HEIGHT,
-                                                0.1f, 100.0f);
+            // Render the displayed text
+            // Activate corresponding render state	
+            glUseProgram(postProcessingShaderProgram);
+            glUniform3f(glGetUniformLocation(postProcessingShaderProgram, "textColor"), 1.0f, 1.0f, 1.0f);
+            glActiveTexture(GL_TEXTURE0);
+            glBindVertexArray(quadVAO);
 
-        // Render the axes
-        glUseProgram(axesShaderProgram);
-        glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-        glBindVertexArray(axesVAO);
+            // Iterate through all characters
+            std::string::const_iterator c;
+            float x = 25.0f; // Starting position
+            float y = 300.0f; // Starting position
+            float scale = 1.0f; // Scale of the text
 
-        // Optionally set line width
-        glLineWidth(2.0f);
+            for (c = displayedText.begin(); c != displayedText.end(); c++) 
+            {
+                Character ch = Characters[*c];
 
-        // Draw the axes
-        glDrawArrays(GL_LINES, 0, 6);
-        // Render the model
-        glUseProgram(shaderProgram);
+                float xpos = x + ch.Bearing.x * scale;
+                float ypos = y - (ch.Size.y - ch.Bearing.y) * scale;
 
-        // Set uniforms for the model shader
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        glUniformMatrix4fv(viewLoc,  1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(projLoc,  1, GL_FALSE, glm::value_ptr(projection));
+                float w = ch.Size.x * scale;
+                float h = ch.Size.y * scale;
+                // Update VBO for each character
+                float vertices[6][4] = {
+                    { xpos,     ypos + h,   0.0f, 0.0f },            
+                    { xpos,     ypos,       0.0f, 1.0f },
+                    { xpos + w, ypos,       1.0f, 1.0f },
 
-        // Update viewPos uniform
-        glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPos));
+                    { xpos,     ypos + h,   0.0f, 0.0f },
+                    { xpos + w, ypos,       1.0f, 1.0f },
+                    { xpos + w, ypos + h,   1.0f, 0.0f }           
+                };
+                // Render glyph texture over quad
+                glBindTexture(GL_TEXTURE_2D, ch.TextureID);
+                // Update content of VBO memory
+                glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices); 
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                // Render quad
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+                // Advance cursors for next glyph (advance is number of 1/64 pixels)
+                x += (ch.Advance >> 6) * scale; // Bitshift by 6 to get value in pixels (2^6 = 64)
+            }
+            glBindVertexArray(0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
 
-        // Light and material properties
-        glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 50.0f, 50.0f, 50.0f);
-        glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), 1.0f, 1.0f, 1.0f);
-        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.6f, 0.6f, 0.6f);
+        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
+        else if(gameState == Game_Screen)
+        {
+            // Render
+            glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Render the model
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+            // // Transformations for the model
+            glm::mat4 model = glm::mat4(1.0f);
 
+            // Rotate to make Z-axis point up
+            model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Rotate around X-axis
+
+            // Apply translation based on modelPosition
+            model = glm::translate(model, modelPosition);
+
+            // Apply rotation around new Y-axis (previously Z-axis)
+            model = glm::rotate(model, rotationY, glm::vec3(0.0f, 0.0f, 1.0f));
+
+            // Camera settings
+            //glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
+            glm::vec3 cameraOffset = glm::vec3(30.0f, 30.0f, 30.0f); // checking if the obj is moving linearly in the axes
+            glm::vec3 cameraPos = cameraOffset; // modelPosition + cameraOffset;
+            glm::vec3 target = modelPosition;
+            glm::vec3 up = glm::vec3(.0f, 0.0f, 1.0f);
+            glm::mat4 view = glm::lookAt(cameraPos, target, up);
+
+            // Projection
+            glm::mat4 projection = glm::perspective(glm::radians(45.0f),
+                    (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+
+            // Render the axes
+            glUseProgram(axesShaderProgram);
+            glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+            glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+            glBindVertexArray(axesVAO);
+
+            // // Optionally set line width
+            glLineWidth(2.0f);
+
+            // Draw the axes
+            glDrawArrays(GL_LINES, 0, 6);
+            // Render the model
+            glUseProgram(shaderProgram);
+
+            // Set uniforms for the model shader
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            glUniformMatrix4fv(viewLoc,  1, GL_FALSE, glm::value_ptr(view));
+            glUniformMatrix4fv(projLoc,  1, GL_FALSE, glm::value_ptr(projection));
+
+            // Update viewPos uniform
+            glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPos));
+
+            // Light and material properties
+            glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 50.0f, 50.0f, 50.0f);
+            glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), 1.0f, 1.0f, 1.0f);
+            glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.6f, 0.6f, 0.6f);
+
+            // Render the model
+            glBindVertexArray(VAO);
+            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+        }
+        else if(gameState == End_screen)
+        {
+
+        }
+        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
         // Swap buffers and poll IO events
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -427,9 +728,6 @@ void processInput(GLFWwindow* window) {
         modelPosition.z -= movementSpeed;
     }
 }
-
-
-
 
 // Function to check for OpenGL errors
 void checkGLError(const std::string& errorMessage) {
