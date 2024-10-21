@@ -107,33 +107,6 @@ const char* axesFragmentShaderSource = R"glsl(
     }
 )glsl";
 
-// Post-processing shader
-const char* postProcessingVertexShaderSource = R"glsl(
-    #version 330 core
-    layout(location = 0) in vec2 aPos;
-    layout(location = 1) in vec2 aTexCoords;
-
-    out vec2 TexCoords;
-
-    void main() {
-        TexCoords = aTexCoords;
-        gl_Position = vec4(aPos, 0.0, 1.0);
-    }
-)glsl";
-
-const char* postProcessingFragmentShaderSource = R"glsl(
-    #version 330 core
-    out vec4 FragColor;
-
-    in vec2 TexCoords;
-
-    uniform sampler2D screenTexture;
-
-    void main() {
-        FragColor = texture(screenTexture, TexCoords);
-    }
-)glsl";
-
 // Global variables for rotation and movement
 glm::vec3 modelPosition = glm::vec3(0.0f, 0.0f, 0.0f);
 float rotationY = 0.0f; // Yaw rotation
@@ -153,6 +126,9 @@ struct Character
     GLuint Advance;     // Offset to advance to next char (glyph)
 };
 
+// Declare the Characters map globally
+std::map<GLchar, Character> Characters;
+
 enum GameState 
 {
     Start_Screen,
@@ -161,15 +137,7 @@ enum GameState
     End_screen
 };
 
-GameState gameState = Lore_Screen;
-
-void handleInput(GLFWwindow* window) 
-{
-    if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) 
-    {
-        gameState = Game_Screen;
-    }
-}
+GameState gameState = Start_Screen;
 
 int main() 
 {
@@ -378,137 +346,79 @@ int main()
     unsigned int projLoc  = glGetUniformLocation(shaderProgram, "projection");
     //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-    //---------------------------------------------------- Post-processing setup ------------------------------------------------------------------------------------
-    
-    // Framebuffer configuration
-    unsigned int framebuffer;
-    glGenFramebuffers(1, &framebuffer);
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-
-    // Create a color attachment texture
-    unsigned int textureColorbuffer;
-    glGenTextures(1, &textureColorbuffer);
-    glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureColorbuffer, 0);
-
-    // Create a renderbuffer object for depth and stencil attachment (we won't be sampling these)
-    unsigned int rbo;
-    glGenRenderbuffers(1, &rbo);
-    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCR_WIDTH, SCR_HEIGHT);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
-
-    // Check if framebuffer is complete
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        std::cerr << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    // Screen quad VAO
-    float quadVertices[] = {
-        // positions   // texCoords
-        -1.0f,  1.0f,  0.0f, 1.0f,
-        -1.0f, -1.0f,  0.0f, 0.0f,
-         1.0f, -1.0f,  1.0f, 0.0f,
-
-        -1.0f,  1.0f,  0.0f, 1.0f,
-         1.0f, -1.0f,  1.0f, 0.0f,
-         1.0f,  1.0f,  1.0f, 1.0f
-    };
-
-    unsigned int quadVAO, quadVBO;
-    glGenVertexArrays(1, &quadVAO);
-    glGenBuffers(1, &quadVBO);
-    glBindVertexArray(quadVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-
-    unsigned int postProcessingVertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(postProcessingVertexShader, 1, &postProcessingVertexShaderSource, NULL);
-    glCompileShader(postProcessingVertexShader);
-    checkGLError("Post-processing vertex shader compilation error");
-
-    unsigned int postProcessingFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(postProcessingFragmentShader, 1, &postProcessingFragmentShaderSource, NULL);
-    glCompileShader(postProcessingFragmentShader);
-    checkGLError("Post-processing fragment shader compilation error");
-
-    unsigned int postProcessingShaderProgram = glCreateProgram();
-    glAttachShader(postProcessingShaderProgram, postProcessingVertexShader);
-    glAttachShader(postProcessingShaderProgram, postProcessingFragmentShader);
-    glLinkProgram(postProcessingShaderProgram);
-    checkGLError("Post-processing shader program linking error");
-
-    glDeleteShader(postProcessingVertexShader);
-    glDeleteShader(postProcessingFragmentShader);
-
     //---------------------------------------------------- Freetype setup ------------------------------------------------------------------------------------
-    // Initialize FreeType
-            FT_Library ft;
-            if (FT_Init_FreeType(&ft)) {
-                std::cerr << "ERROR::FREETYPE: Could not init FreeType Library" << std::endl;
-            }
+    // // Initialize FreeType
+    FT_Library ft;
+    if (FT_Init_FreeType(&ft)) {
+        std::cerr << "ERROR::FREETYPE: Could not init FreeType Library" << std::endl;
+    }
 
-            // Load font as face
-            FT_Face face;
-            if (FT_New_Face(ft, "c:/WINDOWS/Fonts/VGAFIX.FON", 0, &face)) {
-                std::cerr << "ERROR::FREETYPE: Failed to load font" << std::endl;
-            }
+    // Load font as face
+    FT_Face face;
+    if (FT_New_Face(ft, "c:/WINDOWS/Fonts/Consola.ttf", 0, &face)) {
+        std::cerr << "ERROR::FREETYPE: Failed to load font" << std::endl;
 
-            // Set size to load glyphs as
-            FT_Set_Pixel_Sizes(face, 0, 48);
+    }
+    // Set size to load glyphs as
+    FT_Set_Pixel_Sizes(face, 0, 48);
 
-            // Disable byte-alignment restriction
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    // Load first 128 characters of ASCII set
+    std::map<GLchar, Character> Characters;
+    for (GLubyte c = 0; c < 128; c++) {
+        // Load character glyph 
+        if (FT_Load_Char(face, c, FT_LOAD_RENDER)) {
+            std::cerr << "ERROR::FREETYPE: Failed to load Glyph" << std::endl;
+            continue;
+        }
+        // Generate texture
+        GLuint texture;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            GL_RED,
+            face->glyph->bitmap.width,
+            face->glyph->bitmap.rows,
+            0,
+            GL_RED,
+            GL_UNSIGNED_BYTE,
+            face->glyph->bitmap.buffer
+        );
+        // Set texture options
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        // Now store character for later use
+        Character character = {
+            texture,
+            glm::ivec2(face->glyph->bitmap.width, face->glyph->bitmap.rows),
+            glm::ivec2(face->glyph->bitmap_left, face->glyph->bitmap_top),
+            static_cast<GLuint>(face->glyph->advance.x)
+        };
+        Characters.insert(std::pair<GLchar, Character>(c, character));
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
 
-            // Load first 128 characters of ASCII set
-            std::map<GLchar, Character> Characters;
-            for (GLubyte c = 0; c < 128; c++) {
-                // Load character glyph 
-                if (FT_Load_Char(face, c, FT_LOAD_RENDER)) {
-                    std::cerr << "ERROR::FREETYPE: Failed to load Glyph" << std::endl;
-                    continue;
-                }
-                // Generate texture
-                GLuint texture;
-                glGenTextures(1, &texture);
-                glBindTexture(GL_TEXTURE_2D, texture);
-                glTexImage2D(
-                    GL_TEXTURE_2D,
-                    0,
-                    GL_RED,
-                    face->glyph->bitmap.width,
-                    face->glyph->bitmap.rows,
-                    0,
-                    GL_RED,
-                    GL_UNSIGNED_BYTE,
-                    face->glyph->bitmap.buffer
-                );
-                // Set texture options
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                // Now store character for later use
-                Character character = {
-                    texture,
-                    glm::ivec2(face->glyph->bitmap.width, face->glyph->bitmap.rows),
-                    glm::ivec2(face->glyph->bitmap_left, face->glyph->bitmap_top),
-                    face->glyph->advance.x
-                };
-                Characters.insert(std::pair<GLchar, Character>(c, character));
-            }
-            glBindTexture(GL_TEXTURE_2D, 0);
+    // Destroy FreeType once we're finishe
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
+    
+    // Setup text specific VAO and VBO
+    unsigned int textVAO, textVBO;
+    glGenVertexArrays(1, &textVAO);
+    glGenBuffers(1, &textVBO);
 
-            // Destroy FreeType once we're finished
-            FT_Done_Face(face);
-            FT_Done_FreeType(ft);
+    glBindVertexArray(textVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, textVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, NULL, GL_DYNAMIC_DRAW);
+
+    // Setup vertex attributes for the text rendering (positions and texture coordinates)
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+
     //---------------------------------------------------------------------------------------------------------------------------------------------------------------
     // Main loop
     while (!glfwWindowShouldClose(window)) 
@@ -519,69 +429,33 @@ int main()
         // If statements dictate the current state of the game
         if(gameState == Start_Screen)
         {
-            //TODO: Add code to render the start screen
-            glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-            //TODO: Add code to render "Start Game" text or button
-        }
-        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
-        else if (gameState == Lore_Screen) 
-        {
-            // Clear the screen with black color
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
+            // Render text "Raumschiff"
+            static float scale = 1.0f;
+            static bool growing = true;
+            const float scaleSpeed = 0.05f;
+            const float maxScale = 3.5f;
+            const float minScale = 0.5f;
 
-            // Load the lore text from file
-            static std::string loreText;
-            static bool loreLoaded = false;
-            if (!loreLoaded) 
-            {
-                std::ifstream loreFile("src/Lore_text_file.txt");
-                if (!loreFile.is_open()) 
-                {
-                    std::cerr << "Failed to open lore text file!" << std::endl;
-                    glfwSetWindowShouldClose(window, true);
-                    break;
-                }
-
-                std::stringstream loreStream;
-                loreStream << loreFile.rdbuf();
-                loreText = loreStream.str();
-                loreFile.close();
-                loreLoaded = true;
+            // Update scale
+            if (growing) {
+            scale += scaleSpeed;
+            if (scale >= maxScale) growing = false;
+            } else {
+            scale -= scaleSpeed;
+            if (scale <= minScale) growing = true;
             }
 
-            // Print the lore text slowly
-            static size_t charIndex = 0;
-            static float timeAccumulator = 0.0f;
-            const float charDisplayInterval = 0.05f; // Time interval between characters
+            std::string text = "Raumschiff";
+            float x = (SCR_WIDTH - 25.0f * text.length()) / 2.0f; // Center X position
+            float y = (SCR_HEIGHT / 2.0f); // Center Y position
+            glm::vec3 color = glm::vec3(1.0f, 1.0f, 1.0f); // White color
 
-            timeAccumulator += glfwGetTime();
-            glfwSetTime(0.0);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-            if (timeAccumulator >= charDisplayInterval && charIndex < loreText.size()) 
-            {
-                charIndex++;
-                timeAccumulator = 0.0f;
-            }
+            glBindVertexArray(textVAO);
 
-            std::string displayedText = loreText.substr(0, charIndex);
-
-            // Render the displayed text
-            // Activate corresponding render state	
-            glUseProgram(postProcessingShaderProgram);
-            glUniform3f(glGetUniformLocation(postProcessingShaderProgram, "textColor"), 1.0f, 1.0f, 1.0f);
-            glActiveTexture(GL_TEXTURE0);
-            glBindVertexArray(quadVAO);
-
-            // Iterate through all characters
-            std::string::const_iterator c;
-            float x = 25.0f; // Starting position
-            float y = 300.0f; // Starting position
-            float scale = 1.0f; // Scale of the text
-
-            for (c = displayedText.begin(); c != displayedText.end(); c++) 
-            {
+            for (std::string::const_iterator c = text.begin(); c != text.end(); c++) {
                 Character ch = Characters[*c];
 
                 float xpos = x + ch.Bearing.x * scale;
@@ -589,31 +463,41 @@ int main()
 
                 float w = ch.Size.x * scale;
                 float h = ch.Size.y * scale;
+
                 // Update VBO for each character
                 float vertices[6][4] = {
-                    { xpos,     ypos + h,   0.0f, 0.0f },            
+                    { xpos,     ypos + h,   0.0f, 0.0f },
                     { xpos,     ypos,       0.0f, 1.0f },
                     { xpos + w, ypos,       1.0f, 1.0f },
 
                     { xpos,     ypos + h,   0.0f, 0.0f },
                     { xpos + w, ypos,       1.0f, 1.0f },
-                    { xpos + w, ypos + h,   1.0f, 0.0f }           
+                    { xpos + w, ypos + h,   1.0f, 0.0f }
                 };
-                // Render glyph texture over quad
+
+                // Bind texture for current character
                 glBindTexture(GL_TEXTURE_2D, ch.TextureID);
-                // Update content of VBO memory
-                glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
-                glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices); 
-                glBindBuffer(GL_ARRAY_BUFFER, 0);
-                // Render quad
+
+                // Update the text VBO with the new vertices for this glyph
+                glBindBuffer(GL_ARRAY_BUFFER, textVBO);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+
+                // Render the glyph quad
                 glDrawArrays(GL_TRIANGLES, 0, 6);
-                // Advance cursors for next glyph (advance is number of 1/64 pixels)
-                x += (ch.Advance >> 6) * scale; // Bitshift by 6 to get value in pixels (2^6 = 64)
+
+                // Move cursor to the next character position
+                x += (ch.Advance >> 6) * scale;
             }
+
             glBindVertexArray(0);
             glBindTexture(GL_TEXTURE_2D, 0);
-        }
+            glDisable(GL_BLEND);
 
+            // Check for Enter key press to transition to Game_Screen
+            if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
+            gameState = Game_Screen;
+            }
+        }
         //---------------------------------------------------------------------------------------------------------------------------------------------------------------
         else if(gameState == Game_Screen)
         {
@@ -696,13 +580,13 @@ int main()
 
     glfwTerminate();
     return 0;
+
 }
 
 void processInput(GLFWwindow* window) {
     // Close window
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
-
     // Calculate forward vector based on current rotation
     glm::vec3 forward = glm::vec3(-cos(rotationY), -sin(rotationY), 0.0f);
     glm::vec3 right = glm::vec3(-forward.y, forward.x, 0.0f); // Right vector is perpendicular to forward
