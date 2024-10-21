@@ -109,9 +109,28 @@ const float movementSpeed = 0.05f;
 void processInput(GLFWwindow* window);
 void checkGLError(const std::string& errorMessage);
 
-int main() {
+enum GameState 
+{
+    Start_Screen,
+    Lore_Screen,
+    Game_Screen,
+};
+
+GameState gameState = Game_Screen;
+
+void handleInput(GLFWwindow* window) 
+{
+    if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) 
+    {
+        gameState = Game_Screen;
+    }
+}
+
+int main() 
+{
     // Initialize GLFW
-    if (!glfwInit()) {
+    if (!glfwInit()) 
+    {
         std::cerr << "Failed to initialize GLFW" << std::endl;
         return -1;
     }
@@ -140,7 +159,8 @@ int main() {
     }
 
     checkGLError("GLEW initialization error");
-
+    // Set up rendering
+    //---------------------------------------------------------------------------------------------------------------------------------------------------------------
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
 
@@ -311,70 +331,86 @@ int main() {
     unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
     unsigned int viewLoc  = glGetUniformLocation(shaderProgram, "view");
     unsigned int projLoc  = glGetUniformLocation(shaderProgram, "projection");
+    //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     // Main loop
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window)) 
+    {
         // Input
         processInput(window);
+        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
+        // If statements dictate the current state of the game
+        if(gameState == Start_Screen)
+        {
+            //TODO: Add code to render the start screen
+            glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            //TODO: Add code to render "Start Game" text or button
+        }
+        else if(gameState == Game_Screen)
+        {
+            // Render
+            glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Render
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            // // Transformations for the model
+            glm::mat4 model = glm::mat4(1.0f);
 
-        // Transformations for the model
-        glm::mat4 model = glm::mat4(1.0f);
+            // Rotate to make Z-axis point up
+            model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Rotate around X-axis
 
-        // Rotate to make Z-axis point up
-        model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Rotate around X-axis
+            // Apply translation based on modelPosition
+            model = glm::translate(model, modelPosition);
 
-        // Apply translation based on modelPosition
-        model = glm::translate(model, modelPosition);
+            // Apply rotation around new Y-axis (previously Z-axis)
+            model = glm::rotate(model, rotationY, glm::vec3(0.0f, 0.0f, 1.0f));
 
-        // Apply rotation around new Y-axis (previously Z-axis)
-        model = glm::rotate(model, rotationY, glm::vec3(0.0f, 0.0f, 1.0f));
+            // Camera settings
+            //glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
+            glm::vec3 cameraOffset = glm::vec3(30.0f, 30.0f, 30.0f); // checking if the obj is moving linearly in the axes
+            glm::vec3 cameraPos = cameraOffset; // modelPosition + cameraOffset;
+            glm::vec3 target = modelPosition;
+            glm::vec3 up = glm::vec3(.0f, 0.0f, 1.0f);
+            glm::mat4 view = glm::lookAt(cameraPos, target, up);
 
-        // Camera settings
-        //glm::vec3 cameraOffset = glm::vec3(30.0f, 0.0f, 15.0f); // Adjust offsets as needed
-        glm::vec3 cameraOffset = glm::vec3(30.0f, 30.0f, 30.0f); // checking if the obj is moving linearly in the axes
-        glm::vec3 cameraPos = cameraOffset; // modelPosition + cameraOffset;
-        glm::vec3 target = modelPosition;
-        glm::vec3 up = glm::vec3(.0f, 0.0f, 1.0f);
-        glm::mat4 view = glm::lookAt(cameraPos, target, up);
+            // Projection
+            glm::mat4 projection = glm::perspective(glm::radians(45.0f),
+                    (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
 
-        // Projection
-        glm::mat4 projection = glm::perspective(glm::radians(45.0f),
-                (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+            // Render the axes
+            glUseProgram(axesShaderProgram);
+            glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+            glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+            glBindVertexArray(axesVAO);
 
-        // Render the axes
-        glUseProgram(axesShaderProgram);
-        glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(glGetUniformLocation(axesShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-        glBindVertexArray(axesVAO);
+            // // Optionally set line width
+            glLineWidth(2.0f);
 
-        // Optionally set line width
-        glLineWidth(2.0f);
+            // Draw the axes
+            glDrawArrays(GL_LINES, 0, 6);
+            // Render the model
+            glUseProgram(shaderProgram);
 
-        // Draw the axes
-        glDrawArrays(GL_LINES, 0, 6);
-        // Render the model
-        glUseProgram(shaderProgram);
+            // Set uniforms for the model shader
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            glUniformMatrix4fv(viewLoc,  1, GL_FALSE, glm::value_ptr(view));
+            glUniformMatrix4fv(projLoc,  1, GL_FALSE, glm::value_ptr(projection));
 
-        // Set uniforms for the model shader
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        glUniformMatrix4fv(viewLoc,  1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(projLoc,  1, GL_FALSE, glm::value_ptr(projection));
+            // Update viewPos uniform
+            glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPos));
 
-        // Update viewPos uniform
-        glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPos));
+            // Light and material properties
+            glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 50.0f, 50.0f, 50.0f);
+            glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), 1.0f, 1.0f, 1.0f);
+            glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.6f, 0.6f, 0.6f);
 
-        // Light and material properties
-        glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 50.0f, 50.0f, 50.0f);
-        glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), 1.0f, 1.0f, 1.0f);
-        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.6f, 0.6f, 0.6f);
+            // Render the model
+            glBindVertexArray(VAO);
+            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+        }
+        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-        // Render the model
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+        //---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
         // Swap buffers and poll IO events
         glfwSwapBuffers(window);
@@ -422,9 +458,6 @@ void processInput(GLFWwindow* window) {
         modelPosition.z -= movementSpeed;
     }
 }
-
-
-
 
 // Function to check for OpenGL errors
 void checkGLError(const std::string& errorMessage) {
